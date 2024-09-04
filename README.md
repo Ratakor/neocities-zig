@@ -12,12 +12,12 @@ cd neocities-zig-bin
 makepkg -si
 ```
 
-### Manual Installation (Linux)
+### Manual Installation
 
 Grab one of the [release](https://github.com/Ratakor/neocities-zig/releases)
 according to your system.
 
-### Building (Mac OSX, Windows, ...)
+### Building
 
 Requires zig 0.13.0.
 ```

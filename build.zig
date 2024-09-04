@@ -35,23 +35,29 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_tests.step);
 
     const release = b.step("release", "Make an upstream binary release");
-    const release_targets = &[_][]const u8{
-        "aarch64-linux", "x86_64-linux", "x86-linux", "riscv64-linux",
+
+    const release_targets: []const std.Target.Query = &.{
+        .{ .cpu_arch = .aarch64, .os_tag = .macos },
+        .{ .cpu_arch = .aarch64, .os_tag = .linux },
+        .{ .cpu_arch = .x86_64, .os_tag = .linux },
+        .{ .cpu_arch = .x86_64, .os_tag = .windows },
     };
-    for (release_targets) |target_string| {
+    for (release_targets) |target_query| {
         const rel_exe = b.addExecutable(.{
             .name = "neocities",
             .root_source_file = b.path("src/main.zig"),
-            .target = b.resolveTargetQuery(std.Target.Query.parse(.{
-                .arch_os_abi = target_string,
-            }) catch unreachable),
+            .target = b.resolveTargetQuery(target_query),
             .optimize = .ReleaseSafe,
             .strip = true,
         });
 
+        rel_exe.root_module.addImport("Neocities", neocities);
         const install = b.addInstallArtifact(rel_exe, .{});
         install.dest_dir = .prefix;
-        install.dest_sub_path = b.fmt("{s}-{s}", .{ target_string, rel_exe.name });
+        install.dest_sub_path = b.fmt("{s}-{s}", .{
+            target_query.zigTriple(b.allocator) catch unreachable,
+            rel_exe.name,
+        });
 
         release.dependOn(&install.step);
     }
