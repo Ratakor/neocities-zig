@@ -1,10 +1,10 @@
 # neocities-zig
 neocities-zig is a CLI and a library for the [Neocities](https://neocities.org)
-REST [API](https://https://neocities.org/api).
+REST [API](https://neocities.org/api).
 
 ## CLI Installation
 
-### AUR (Arch Linux)
+### [AUR](https://aur.archlinux.org/packages/neocities-zig-bin) (Arch Linux)
 
 ```
 git clone https://aur.archlinux.org/neocities-zig-bin.git
