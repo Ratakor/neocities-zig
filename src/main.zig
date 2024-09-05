@@ -7,7 +7,7 @@ pub const std_options: std.Options = .{
     .logFn = coloredLog,
 };
 
-const version = "0.1.0";
+const version = "0.1.1";
 
 const usage =
     \\Usage: {s} <command> [options]
