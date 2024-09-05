@@ -135,20 +135,6 @@ fn getConfigPath(allocator: std.mem.Allocator) ![]const u8 {
     }
 }
 
-fn openConfigFile(config_path: []const u8) !std.fs.File {
-    const cwd = std.fs.cwd();
-    if (cwd.openFile(config_path, .{ .mode = .read_write })) |config_file| {
-        return config_file;
-    } else |err| {
-        if (err == error.FileNotFound) {
-            try cwd.makePath(config_path[0 .. config_path.len - "config.json".len]);
-            return cwd.createFile(config_path, .{ .read = true });
-        } else {
-            return err;
-        }
-    }
-}
-
 fn getApiKey(allocator: std.mem.Allocator) ![]const u8 {
     if (std.process.getEnvVarOwned(allocator, "NEOCITIES_API_KEY")) |api_key| {
         return api_key;
@@ -160,20 +146,24 @@ fn getApiKey(allocator: std.mem.Allocator) ![]const u8 {
 
     const config_path = try getConfigPath(allocator);
     defer allocator.free(config_path);
-    const config_file = try openConfigFile(config_path);
-    defer config_file.close();
-
-    const config_file_content = try config_file.readToEndAlloc(allocator, 512);
-    defer allocator.free(config_file_content);
-    if (std.json.parseFromSlice(Config, allocator, config_file_content, .{})) |config| {
-        defer config.deinit();
-        return allocator.dupe(u8, config.value.api_key);
-    } else |err| switch (err) {
-        error.UnexpectedEndOfInput => {},
-        error.MissingField => std.log.warn("Missing field in the configuration file.", .{}),
-        error.UnknownField => std.log.warn("Unknown field in the configuration file.", .{}),
-        else => return err,
-    }
+    const cwd = std.fs.cwd();
+    const config_file = if (cwd.openFile(config_path, .{})) |config_file| blk: {
+        const content = try config_file.readToEndAlloc(allocator, 4096);
+        defer allocator.free(content);
+        if (std.json.parseFromSlice(Config, allocator, content, .{})) |config| {
+            defer config.deinit();
+            return allocator.dupe(u8, config.value.api_key);
+        } else |err| {
+            std.log.warn("Failed to parse the configuration file: {}", .{err});
+            break :blk try cwd.createFile(config_path, .{});
+        }
+    } else |err| blk: {
+        if (err != error.FileNotFound) {
+            return err;
+        }
+        try cwd.makePath(config_path[0 .. config_path.len - "config.json".len]);
+        break :blk try cwd.createFile(config_path, .{});
+    };
 
     const stdout = std.io.getStdOut().writer();
     const stdin = std.io.getStdIn().reader();
@@ -192,14 +182,38 @@ fn getApiKey(allocator: std.mem.Allocator) ![]const u8 {
     const handle = std.os.linux.STDIN_FILENO;
     var original: std.os.linux.termios = undefined;
     _ = std.os.linux.tcgetattr(handle, &original);
-    var new: std.os.linux.termios = original;
-    new.lflag.ECHO = false;
-    _ = std.os.linux.tcsetattr(handle, .NOW, &new);
+    var hidden: std.os.linux.termios = original;
+    hidden.lflag.ICANON = false;
+    hidden.lflag.ECHO = false;
+    _ = std.os.linux.tcsetattr(handle, .NOW, &hidden);
+    errdefer _ = std.os.linux.tcsetattr(handle, .NOW, &original);
 
     const password = if (std.process.getEnvVarOwned(allocator, "NEOCITIES_PASSWORD")) |pass| blk: {
         break :blk pass;
     } else |_| blk: {
-        break :blk (try stdin.readUntilDelimiterOrEofAlloc(allocator, '\n', 64)).?;
+        var buf: [64]u8 = undefined;
+        var size: usize = 0;
+        while (true) {
+            if (size == buf.len) {
+                return error.StreamTooLong;
+            }
+            buf[size] = try stdin.readByte();
+            switch (buf[size]) {
+                '\n' => break,
+                '\x7f' => {
+                    if (size > 0) {
+                        size -= 1;
+                        try stdout.writeAll("\x08 \x08");
+                    }
+                    continue;
+                },
+                else => {},
+            }
+            size += 1;
+            try stdout.writeAll("*");
+        }
+        try stdout.writeAll("\n");
+        break :blk try allocator.dupe(u8, buf[0..size]);
     };
     defer allocator.free(password);
 

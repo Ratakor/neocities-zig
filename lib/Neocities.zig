@@ -189,7 +189,7 @@ fn get(self: Neocities, method: []const u8, no_auth: bool) ![]const u8 {
     var client: std.http.Client = .{ .allocator = self.allocator };
     defer client.deinit();
 
-    const uri_str = if (self.auth == .api_key or no_auth)
+    const url = if (self.auth == .api_key or no_auth)
         try std.fmt.allocPrint(
             self.allocator,
             protocol ++ "://" ++ api_url ++ "/{s}",
@@ -201,8 +201,8 @@ fn get(self: Neocities, method: []const u8, no_auth: bool) ![]const u8 {
             protocol ++ "://{s}:{s}@" ++ api_url ++ "/{s}",
             .{ self.auth.password.user, self.auth.password.pass, method },
         );
-    defer self.allocator.free(uri_str);
-    const uri = try std.Uri.parse(uri_str);
+    defer self.allocator.free(url);
+    const uri = try std.Uri.parse(url);
 
     const authorization = if (self.auth == .api_key and !no_auth)
         try std.fmt.allocPrint(self.allocator, "Bearer {s}", .{self.auth.api_key})
@@ -210,10 +210,9 @@ fn get(self: Neocities, method: []const u8, no_auth: bool) ![]const u8 {
         null;
     defer if (authorization) |auth| self.allocator.free(auth);
 
-    const header_buf = try self.allocator.alloc(u8, 1024 * 1024 * 4);
-    defer self.allocator.free(header_buf);
+    var header_buf: [4096]u8 = undefined;
     var req = try client.open(.GET, uri, .{
-        .server_header_buffer = header_buf,
+        .server_header_buffer = &header_buf,
         .headers = if (authorization) |a| .{ .authorization = .{ .override = a } } else .{},
     });
     defer req.deinit();
@@ -229,7 +228,7 @@ fn post(self: Neocities, method: PostMethod, payload: []const u8) ![]const u8 {
     var client: std.http.Client = .{ .allocator = self.allocator };
     defer client.deinit();
 
-    const uri_str = if (self.auth == .api_key)
+    const url = if (self.auth == .api_key)
         try std.fmt.allocPrint(
             self.allocator,
             protocol ++ "://" ++ api_url ++ "/{s}",
@@ -241,8 +240,8 @@ fn post(self: Neocities, method: PostMethod, payload: []const u8) ![]const u8 {
             protocol ++ "://{s}:{s}@" ++ api_url ++ "/{s}",
             .{ self.auth.password.user, self.auth.password.pass, @tagName(method) },
         );
-    defer self.allocator.free(uri_str);
-    const uri = try std.Uri.parse(uri_str);
+    defer self.allocator.free(url);
+    const uri = try std.Uri.parse(url);
 
     const authorization = if (self.auth == .api_key)
         try std.fmt.allocPrint(self.allocator, "Bearer {s}", .{self.auth.api_key})

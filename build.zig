@@ -35,7 +35,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_tests.step);
 
     const release = b.step("release", "Make an upstream binary release");
-
     const release_targets: []const std.Target.Query = &.{
         .{ .cpu_arch = .aarch64, .os_tag = .macos },
         .{ .cpu_arch = .aarch64, .os_tag = .linux },
