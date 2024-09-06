@@ -15,7 +15,7 @@ makepkg -si
 ### Manual Installation
 
 Grab one of the [release](https://github.com/Ratakor/neocities-zig/releases)
-according to your system.
+according to your system. Zsh completions are available [here](_neocities).
 
 ### Building
 
