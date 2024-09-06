@@ -1,0 +1,40 @@
+#compdef neocities
+_neocities() {
+    local state line
+    _arguments -s \
+        '1: :->cmd' \
+        '*: :->args'
+
+    case $state in
+    cmd)
+        main_commands=('upload\:"Upload files to your Neocities website" delete\:"Delete files from your Neocities website" info\:"Display information about a Neocities website" list\:"List files from your Neocities website" key\:"Display the API key" logout\:"Remove the API key from the configuration file" help\:"Display information about a command" version\:"Display program version"')
+        main_commands=($main_commands)
+        _alternative "args:command:(($main_commands))" "files:filename:$_files"
+        ;;
+    args)
+        case $line[1] in
+        upload)
+            _arguments -s '*:filename:_files'
+            ;;
+        delete)
+            local server_files
+            IFS=$'\n' server_files=($(neocities list --raw 2>/dev/null))
+            _arguments -s "*:files:(($server_files))"
+            ;;
+        list)
+            local server_directories
+            IFS=$'\n' server_directories=($(neocities list --raw --dir 2>/dev/null))
+            _arguments -s \
+                "*:files:(($server_directories))" \
+                "--raw[Display the list without any formatting]" \
+                "--dir[Display only directories]"
+            ;;
+        help)
+            _arguments -s '2:commands:(upload delete info list)' # key logout help version)'
+            ;;
+        esac
+        ;;
+    esac
+}
+
+compdef _neocities neocities

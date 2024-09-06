@@ -10,24 +10,24 @@ pub const std_options: std.Options = .{
 const version = "0.1.1";
 
 const usage =
-    \\Usage: {s} <command> [options]
+    \\Usage: {s} [command] [options]
     \\
     \\Commands:
-    // \\  push       | Upload a directory to your Neocities website.
-    // \\  pull       | Download all files from your Neocities website.
-    \\  upload     | Upload files to your Neocities website.
-    \\  delete     | Delete files from your Neocities website.
-    \\  info       | Display information about a Neocities website.
-    \\  list       | List files from your Neocities website.
-    \\  key        | Display the API key.
-    \\  logout     | Remove the API key from the configuration file.
-    \\  help       | Display information about a command.
-    \\  version    | Display program version.
+    // \\  push       | Upload a directory to your Neocities website
+    // \\  pull       | Download all files from your Neocities website
+    \\  upload     | Upload files to your Neocities website
+    \\  delete     | Delete files from your Neocities website
+    \\  info       | Display information about a Neocities website
+    \\  list       | List files from your Neocities website
+    \\  key        | Display the API key
+    \\  logout     | Remove the API key from the configuration file
+    \\  help       | Display information about a command
+    \\  version    | Display program version
     \\
 ;
 
 const usage_upload =
-    \\Usage: {s} upload <sources> [destination]
+    \\Usage: {s} upload [sources] [destination]
     \\
     \\Description: Upload files to your Neocities website. Sources can only be files.
     \\             If no destination is specified, the default is the root directory.
@@ -39,7 +39,7 @@ const usage_upload =
 ;
 
 const usage_delete =
-    \\Usage: {s} delete <files>
+    \\Usage: {s} delete [files]
     \\
     \\Description: Delete files or directories on your Neocities website.
     \\             Be careful, this action cannot be undone.
@@ -55,10 +55,14 @@ const usage_info =
 ;
 
 const usage_list =
-    \\Usage: {s} list [directory]
+    \\Usage: {s} list [-l] [directory]
     \\
     \\Description: Display a list of all files on your website.
     \\             If no directory is specified, all files will be listed.
+    \\
+    \\Flags:
+    \\  --raw    Display the list without any formatting
+    \\  --dir    Display only directories
     \\
 ;
 
@@ -443,7 +447,20 @@ fn trimDate(date: []const u8) []const u8 {
     return date[5 .. date.len - 6];
 }
 
-fn list(path: ?[]const u8, nc: Neocities) !void {
+fn list(args: *std.process.ArgIterator, nc: Neocities) !void {
+    var is_raw = false;
+    var only_dir = false;
+    var path: ?[]const u8 = null;
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--raw")) {
+            is_raw = true;
+        } else if (std.mem.eql(u8, arg, "--dir")){
+            only_dir = true;
+        } else {
+            path = arg;
+        }
+    }
+
     const list_request = try nc.list(path);
     defer list_request.deinit();
 
@@ -462,6 +479,21 @@ fn list(path: ?[]const u8, nc: Neocities) !void {
     }
 
     const stdout = std.io.getStdOut().writer();
+
+    if (is_raw) {
+        if (only_dir) {
+            for (files) |file| {
+                if (file.is_directory) {
+                    try stdout.print("{s}\n", .{file.path});
+                }
+            }
+        } else {
+            for (files) |file| {
+                try stdout.print("{s}\n", .{file.path});
+            }
+        }
+        return;
+    }
 
     var path_padding: usize = 0;
     var size_padding: usize = 0;
@@ -489,7 +521,7 @@ fn list(path: ?[]const u8, nc: Neocities) !void {
             try stdout.print(Color.blue.toSeq() ++ "{s}", .{file.path});
             try stdout.writeByteNTimes(' ', path_padding - file.path.len + 4 + size_padding);
             try stdout.print(Color.reset ++ "{s}\n", .{trimDate(file.updated_at)});
-        } else {
+        } else if (!only_dir) {
             try stdout.print(Color.green.toSeq() ++ "{s}", .{file.path});
             try stdout.writeByteNTimes(' ', path_padding - file.path.len + 2);
             const human_readable_size = try toHumanReadableSize(&buf, file.size.?);
@@ -521,14 +553,14 @@ fn logout(args: *std.process.ArgIterator, allocator: std.mem.Allocator) !void {
 
 fn help(command: ?[]const u8) !void {
     const stderr = std.io.getStdErr().writer();
-    if (command) |com| {
-        if (std.mem.eql(u8, com, "upload")) {
+    if (command) |cmd| {
+        if (std.mem.eql(u8, cmd, "upload")) {
             try stderr.print(usage_upload, .{progname});
-        } else if (std.mem.eql(u8, com, "delete")) {
+        } else if (std.mem.eql(u8, cmd, "delete")) {
             try stderr.print(usage_delete, .{progname});
-        } else if (std.mem.eql(u8, com, "info")) {
+        } else if (std.mem.eql(u8, cmd, "info")) {
             try stderr.print(usage_info, .{progname});
-        } else if (std.mem.eql(u8, com, "list")) {
+        } else if (std.mem.eql(u8, cmd, "list")) {
             try stderr.print(usage_list, .{progname});
         } else {
             try stderr.print(usage, .{progname});
@@ -559,7 +591,7 @@ pub fn main() !void {
     } else if (std.mem.eql(u8, command, "info")) {
         try info(args.next(), nc);
     } else if (std.mem.eql(u8, command, "list")) {
-        try list(args.next(), nc);
+        try list(&args, nc);
     } else if (std.mem.eql(u8, command, "key")) {
         const stdout = std.io.getStdOut().writer();
         try stdout.print("{s}\n", .{api_key});

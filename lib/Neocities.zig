@@ -217,7 +217,6 @@ fn get(self: Neocities, method: []const u8, no_auth: bool) ![]const u8 {
     });
     defer req.deinit();
     try req.send();
-    try req.finish();
     try req.wait();
     // try std.testing.expectEqual(req.response.status, .ok);
 
