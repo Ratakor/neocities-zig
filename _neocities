@@ -9,7 +9,7 @@ _neocities() {
     cmd)
         main_commands=('upload\:"Upload files to your Neocities website" delete\:"Delete files from your Neocities website" info\:"Display information about a Neocities website" list\:"List files from your Neocities website" key\:"Display the API key" logout\:"Remove the API key from the configuration file" help\:"Display information about a command" version\:"Display program version"')
         main_commands=($main_commands)
-        _alternative "args:command:(($main_commands))" "files:filename:$_files"
+        _alternative "args:command:(($main_commands))"
         ;;
     args)
         case $line[1] in
@@ -36,5 +36,3 @@ _neocities() {
         ;;
     esac
 }
-
-compdef _neocities neocities
