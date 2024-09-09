@@ -301,71 +301,42 @@ test "fake user" {
     try std.testing.expect(delete_json.value.result == .@"error");
 }
 
-// test "user with password" {
-//     const name = std.c.getenv("NEOCITIES_USER") orelse unreachable;
-//     const pass = std.c.getenv("NEOCITIES_PASS") orelse unreachable;
-//     const nc = initPassword(
-//         std.testing.allocator,
-//         name[0..std.mem.len(name)],
-//         pass[0..std.mem.len(pass)],
-//     );
+test "user with login from env" {
+    const nc = blk: {
+        if (std.posix.getenv("NEOCITIES_API_KEY")) |api_key| {
+            break :blk initApiKey(std.testing.allocator, api_key);
+        }
+        std.debug.print("$NEOCITIES_API_KEY not found: ", .{});
+        std.debug.print("trying to login with $NEOCITIES_USER and $NEOCITIES_PASS\n", .{});
+        const user = std.posix.getenv("NEOCITIES_USER") orelse unreachable;
+        const pass = std.posix.getenv("NEOCITIES_PASS") orelse unreachable;
+        break :blk initPassword(std.testing.allocator, user, pass);
+    };
 
-//     const info_json = try nc.info(null);
-//     defer info_json.deinit();
-//     try std.testing.expect(info_json.value.result == .success);
+    const info_json = try nc.info(null);
+    defer info_json.deinit();
+    try std.testing.expect(info_json.value.result == .success);
 
-//     const list_json = try nc.list(null);
-//     defer list_json.deinit();
-//     try std.testing.expect(list_json.value.result == .success);
+    const list_json = try nc.list(null);
+    defer list_json.deinit();
+    try std.testing.expect(list_json.value.result == .success);
 
-//     const key_json = try nc.key();
-//     defer key_json.deinit();
-//     try std.testing.expect(key_json.value.result == .success);
+    const key_json = try nc.key();
+    defer key_json.deinit();
+    try std.testing.expect(key_json.value.result == .success);
 
-//     const upload_json = try nc.upload(&[_]UploadFile{.{
-//         .dest_name = "README.md",
-//         .source_path = "README.md",
-//     }});
-//     defer upload_json.deinit();
-//     try std.testing.expect(upload_json.value.result == .success);
+    const upload_json = try nc.upload(&[_]UploadFile{.{
+        .dest_name = "README.md",
+        .source_path = "README.md",
+    }});
+    defer upload_json.deinit();
+    try std.testing.expect(upload_json.value.result == .success);
 
-//     const delete_json = try nc.delete(&[_][]const u8{ "README.md" });
-//     defer delete_json.deinit();
-//     try std.testing.expect(delete_json.value.result == .success);
+    const delete_json = try nc.delete(&[_][]const u8{ "README.md" });
+    defer delete_json.deinit();
+    try std.testing.expect(delete_json.value.result == .success);
 
-//     const delete_error_json = try nc.delete(&[_][]const u8{ "README.md" });
-//     defer delete_error_json.deinit();
-//     try std.testing.expect(delete_error_json.value.result == .@"error");
-// }
-
-// test "user with api key" {
-//     const api_key = std.c.getenv("NEOCITIES_API_KEY") orelse unreachable;
-//     const nc = initApiKey(std.testing.allocator, api_key[0..std.mem.len(api_key)]);
-
-//     const info_json = try nc.info(null);
-//     defer info_json.deinit();
-//     try std.testing.expect(info_json.value.result == .success);
-
-//     const list_json = try nc.list(null);
-//     defer list_json.deinit();
-//     try std.testing.expect(list_json.value.result == .success);
-
-//     const key_json = try nc.key();
-//     defer key_json.deinit();
-//     try std.testing.expect(key_json.value.result == .success);
-
-//     const upload_json = try nc.upload(&[_]UploadFile{.{
-//         .dest_name = "README.md",
-//         .source_path = "README.md",
-//     }});
-//     defer upload_json.deinit();
-//     try std.testing.expect(upload_json.value.result == .success);
-
-//     const delete_json = try nc.delete(&[_][]const u8{ "README.md" });
-//     defer delete_json.deinit();
-//     try std.testing.expect(delete_json.value.result == .success);
-
-//     const delete_error_json = try nc.delete(&[_][]const u8{ "README.md" });
-//     defer delete_error_json.deinit();
-//     try std.testing.expect(delete_error_json.value.result == .@"error");
-// }
+    const delete_error_json = try nc.delete(&[_][]const u8{ "README.md" });
+    defer delete_error_json.deinit();
+    try std.testing.expect(delete_error_json.value.result == .@"error");
+}
