@@ -15,7 +15,7 @@ auth: union(enum) {
 },
 allocator: std.mem.Allocator,
 
-pub const InfoRequest = struct {
+pub const InfoResponse = struct {
     result: enum { success, @"error" },
     error_type: ?[]const u8 = null,
     message: ?[]const u8 = null,
@@ -30,7 +30,7 @@ pub const InfoRequest = struct {
     } = null,
 };
 
-pub const ListRequest = struct {
+pub const ListResponse = struct {
     result: enum { success, @"error" },
     error_type: ?[]const u8 = null,
     message: ?[]const u8 = null,
@@ -44,20 +44,20 @@ pub const ListRequest = struct {
     } = null,
 };
 
-pub const KeyRequest = struct {
+pub const KeyResponse = struct {
     result: enum { success, @"error" },
     error_type: ?[]const u8 = null,
     message: ?[]const u8 = null,
     api_key: ?[]const u8 = null,
 };
 
-pub const DeleteRequest = struct {
+pub const DeleteResponse = struct {
     result: enum { success, @"error" },
     error_type: ?[]const u8 = null,
     message: []const u8,
 };
 
-pub const UploadRequest = struct {
+pub const UploadResponse = struct {
     result: enum { success, @"error" },
     error_type: ?[]const u8 = null,
     message: []const u8,
@@ -84,7 +84,7 @@ pub fn initPassword(allocator: std.mem.Allocator, user: []const u8, pass: []cons
     };
 }
 
-pub fn info(self: Neocities, sitename: ?[]const u8) !std.json.Parsed(InfoRequest) {
+pub fn info(self: Neocities, sitename: ?[]const u8) !std.json.Parsed(InfoResponse) {
     var body: []const u8 = undefined;
     if (sitename) |s| {
         const method = try std.fmt.allocPrint(self.allocator, "info?sitename={s}", .{s});
@@ -97,10 +97,10 @@ pub fn info(self: Neocities, sitename: ?[]const u8) !std.json.Parsed(InfoRequest
 
     std.log.debug("info(): body: \n{s}", .{body});
 
-    return try parseFromSlice(InfoRequest, self.allocator, body, .{ .allocate = .alloc_always });
+    return try parseFromSlice(InfoResponse, self.allocator, body, .{ .allocate = .alloc_always });
 }
 
-pub fn list(self: Neocities, path: ?[]const u8) !std.json.Parsed(ListRequest) {
+pub fn list(self: Neocities, path: ?[]const u8) !std.json.Parsed(ListResponse) {
     var body: []const u8 = undefined;
     if (path) |p| {
         const method = try std.fmt.allocPrint(self.allocator, "list?path={s}", .{p});
@@ -113,19 +113,19 @@ pub fn list(self: Neocities, path: ?[]const u8) !std.json.Parsed(ListRequest) {
 
     std.log.debug("list(): body: \n{s}", .{body});
 
-    return parseFromSlice(ListRequest, self.allocator, body, .{ .allocate = .alloc_always });
+    return parseFromSlice(ListResponse, self.allocator, body, .{ .allocate = .alloc_always });
 }
 
-pub fn key(self: Neocities) !std.json.Parsed(KeyRequest) {
+pub fn key(self: Neocities) !std.json.Parsed(KeyResponse) {
     const body = try self.get("key", false);
     defer self.allocator.free(body);
 
     std.log.debug("key(): body: \n{s}", .{body});
 
-    return parseFromSlice(KeyRequest, self.allocator, body, .{ .allocate = .alloc_always });
+    return parseFromSlice(KeyResponse, self.allocator, body, .{ .allocate = .alloc_always });
 }
 
-pub fn delete(self: Neocities, filenames: []const []const u8) !std.json.Parsed(DeleteRequest) {
+pub fn delete(self: Neocities, filenames: []const []const u8) !std.json.Parsed(DeleteResponse) {
     if (filenames.len == 0) {
         return error.EmptySlice;
     }
@@ -147,10 +147,10 @@ pub fn delete(self: Neocities, filenames: []const []const u8) !std.json.Parsed(D
 
     std.log.debug("delete(): body: \n{s}", .{body});
 
-    return parseFromSlice(DeleteRequest, self.allocator, body, .{ .allocate = .alloc_always });
+    return parseFromSlice(DeleteResponse, self.allocator, body, .{ .allocate = .alloc_always });
 }
 
-pub fn upload(self: Neocities, files: []const UploadFile) !std.json.Parsed(UploadRequest) {
+pub fn upload(self: Neocities, files: []const UploadFile) !std.json.Parsed(UploadResponse) {
     if (files.len == 0) {
         return error.EmptySlice;
     }
@@ -182,7 +182,7 @@ pub fn upload(self: Neocities, files: []const UploadFile) !std.json.Parsed(Uploa
 
     std.log.debug("upload(): body: \n{s}", .{body});
 
-    return parseFromSlice(UploadRequest, self.allocator, body, .{ .allocate = .alloc_always });
+    return parseFromSlice(UploadResponse, self.allocator, body, .{ .allocate = .alloc_always });
 }
 
 fn get(self: Neocities, method: []const u8, no_auth: bool) ![]const u8 {
@@ -308,8 +308,8 @@ test "user with login from env" {
         }
         std.debug.print("$NEOCITIES_API_KEY not found: ", .{});
         std.debug.print("trying to login with $NEOCITIES_USER and $NEOCITIES_PASS\n", .{});
-        const user = std.posix.getenv("NEOCITIES_USER") orelse unreachable;
-        const pass = std.posix.getenv("NEOCITIES_PASS") orelse unreachable;
+        const user = std.posix.getenv("NEOCITIES_USER").?;
+        const pass = std.posix.getenv("NEOCITIES_PASS").?;
         break :blk initPassword(std.testing.allocator, user, pass);
     };
 
