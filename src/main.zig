@@ -1,13 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const Neocities = @import("Neocities");
 
 pub const std_options: std.Options = .{
     .log_level = if (builtin.mode == .Debug) .debug else .info,
     .logFn = coloredLog,
 };
-
-const version = "0.1.2";
 
 const usage =
     \\Usage: {s} [command] [options]
@@ -103,7 +102,7 @@ var progname: []const u8 = undefined;
 
 fn coloredLog(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.EnumLiteral),
+    comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -114,15 +113,15 @@ fn coloredLog(
         .debug => Color.bold ++ Color.cyan.toSeq() ++ "debug" ++ Color.reset,
     };
     const scope_prefix = (if (scope != .default) "@" ++ @tagName(scope) else "") ++ ": ";
-    const stderr = std.io.getStdErr().writer();
-    var bw = std.io.bufferedWriter(stderr);
-    const writer = bw.writer();
+    var stderr_buffer: [256]u8 = undefined;
+    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
+    const stderr = &stderr_writer.interface;
 
     std.debug.lockStdErr();
     defer std.debug.unlockStdErr();
     nosuspend {
-        writer.print(level_txt ++ scope_prefix ++ format ++ "\n", args) catch return;
-        bw.flush() catch return;
+        stderr.print(level_txt ++ scope_prefix ++ format ++ "\n", args) catch {};
+        stderr.flush() catch {};
     }
 }
 
@@ -169,28 +168,33 @@ fn getApiKey(allocator: std.mem.Allocator) ![]const u8 {
         break :blk try cwd.createFile(config_path, .{});
     };
 
-    const stdout = std.io.getStdOut().writer();
-    const stdin = std.io.getStdIn().reader();
+    var unbuffered_stdout = std.fs.File.stdout().writer(&.{});
+    const stdout = &unbuffered_stdout.interface;
+
+    var stdin_buffer: [64]u8 = undefined;
+    var stdin_reader = std.fs.File.stdin().reader(&stdin_buffer);
+    const stdin = &stdin_reader.interface;
+
     try stdout.writeAll("Please login to get your API key.\n");
     try stdout.writeAll("Username: ");
     const username = if (std.process.getEnvVarOwned(allocator, "NEOCITIES_USERNAME")) |name| blk: {
         try stdout.print("{s}\n", .{name});
         break :blk name;
     } else |_| blk: {
-        break :blk (try stdin.readUntilDelimiterOrEofAlloc(allocator, '\n', 64)).?;
+        const name = try stdin.takeDelimiterExclusive('\n'); // will crash if too long
+        break :blk try allocator.dupe(u8, name);
     };
     defer allocator.free(username);
 
     try stdout.writeAll("Password: ");
 
-    const handle = std.os.linux.STDIN_FILENO;
-    var original: std.os.linux.termios = undefined;
-    _ = std.os.linux.tcgetattr(handle, &original);
-    var hidden: std.os.linux.termios = original;
+    const handle = std.posix.STDIN_FILENO;
+    const original = try std.posix.tcgetattr(handle);
+    var hidden = original;
     hidden.lflag.ICANON = false;
     hidden.lflag.ECHO = false;
-    _ = std.os.linux.tcsetattr(handle, .NOW, &hidden);
-    errdefer _ = std.os.linux.tcsetattr(handle, .NOW, &original);
+    try std.posix.tcsetattr(handle, .NOW, hidden);
+    errdefer std.posix.tcsetattr(handle, .NOW, original) catch {};
 
     const password = if (std.process.getEnvVarOwned(allocator, "NEOCITIES_PASSWORD")) |pass| blk: {
         break :blk pass;
@@ -201,7 +205,7 @@ fn getApiKey(allocator: std.mem.Allocator) ![]const u8 {
             if (size == buf.len) {
                 return error.StreamTooLong;
             }
-            buf[size] = try stdin.readByte();
+            buf[size] = try stdin.takeByte();
             switch (buf[size]) {
                 '\n' => break,
                 '\x7f' => {
@@ -221,7 +225,7 @@ fn getApiKey(allocator: std.mem.Allocator) ![]const u8 {
     };
     defer allocator.free(password);
 
-    _ = std.os.linux.tcsetattr(handle, .NOW, &original);
+    try std.posix.tcsetattr(handle, .NOW, original);
 
     const nc = Neocities.initPassword(allocator, username, password);
     const api_key_request = try nc.key();
@@ -571,7 +575,7 @@ fn help(command: ?[]const u8) !void {
 }
 
 pub fn main() !void {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer std.debug.assert(gpa.deinit() == .ok);
     const allocator = gpa.allocator();
 
@@ -593,13 +597,13 @@ pub fn main() !void {
     } else if (std.mem.eql(u8, command, "list")) {
         try list(&args, nc);
     } else if (std.mem.eql(u8, command, "key")) {
-        const stdout = std.io.getStdOut().writer();
-        try stdout.print("{s}\n", .{api_key});
+        const stdout = std.fs.File.stdout().writer(&.{});
+        try stdout.interface.print("{s}\n", .{api_key});
     } else if (std.mem.eql(u8, command, "logout")) {
         try logout(&args, allocator);
     } else if (std.mem.eql(u8, command, "version")) {
-        const stdout = std.io.getStdOut().writer();
-        try stdout.print("{s} v" ++ version ++ "\n", .{progname});
+        const stdout = std.fs.File.stdout().writer(&.{});
+        try stdout.interface.print("{s} v" ++ build_options.version_string ++ "\n", .{progname});
     } else {
         try help(args.next());
     }

@@ -19,7 +19,7 @@ according to your system. Zsh completions are available [here](_neocities).
 
 ### Building
 
-Requires zig 0.13.0.
+Requires zig 0.15.1
 ```
 git clone https://github.com/ratakor/neocities-zig.git
 cd neocities-zig
@@ -42,7 +42,7 @@ neocities and save it in a config file so you won't have to connect again.
 
 Add it to an existing project with this command:
 ```
-zig fetch --save https://github.com/ratakor/neocities-zig/archive/master.tar.gz
+zig fetch --save git+https://github.com/ratakor/neocities-zig
 ```
 
 Add the module to build.zig like that:

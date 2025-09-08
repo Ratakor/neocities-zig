@@ -202,7 +202,6 @@ fn get(self: Neocities, method: []const u8, no_auth: bool) ![]const u8 {
             .{ self.auth.password.user, self.auth.password.pass, method },
         );
     defer self.allocator.free(url);
-    const uri = try std.Uri.parse(url);
 
     const authorization = if (self.auth == .api_key and !no_auth)
         try std.fmt.allocPrint(self.allocator, "Bearer {s}", .{self.auth.api_key})
@@ -210,17 +209,22 @@ fn get(self: Neocities, method: []const u8, no_auth: bool) ![]const u8 {
         null;
     defer if (authorization) |auth| self.allocator.free(auth);
 
-    var header_buf: [4096]u8 = undefined;
-    var req = try client.open(.GET, uri, .{
-        .server_header_buffer = &header_buf,
-        .headers = if (authorization) |a| .{ .authorization = .{ .override = a } } else .{},
-    });
-    defer req.deinit();
-    try req.send();
-    try req.wait();
-    // try std.testing.expectEqual(req.response.status, .ok);
+    var response: std.Io.Writer.Allocating = .init(self.allocator);
+    defer response.deinit();
 
-    return req.reader().readAllAlloc(self.allocator, 1024 * 1024 * 4);
+    const result = try client.fetch(.{
+        .method = .GET,
+        .location = .{ .url = url },
+        .headers = if (authorization) |auth| .{
+            .authorization = .{ .override = auth },
+        } else .{},
+        .response_writer = &response.writer,
+    });
+
+    // TODO: do something with this
+    _ = result.status;
+
+    return response.toOwnedSlice();
 }
 
 fn post(self: Neocities, method: PostMethod, payload: []const u8) ![]const u8 {
@@ -249,6 +253,7 @@ fn post(self: Neocities, method: PostMethod, payload: []const u8) ![]const u8 {
     defer if (authorization) |auth| self.allocator.free(auth);
 
     var header_buf: [4096]u8 = undefined;
+    // TODO: http.fetch is bugged on 0.15.1
     var req = try client.open(.POST, uri, .{
         .server_header_buffer = &header_buf,
         .headers = .{
