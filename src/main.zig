@@ -67,8 +67,8 @@ const usage_list =
 ;
 
 const Config = struct {
-    api_key: []const u8,
-    username: []const u8,
+    API_KEY: []const u8,
+    SITENAME: []const u8,
 };
 
 const Color = enum(u8) {
@@ -152,7 +152,7 @@ fn getApiKey(ctx: Context) ![]const u8 {
             Config,
             ctx.arena.allocator(),
             &json_reader,
-            .{ .allocate = .alloc_always },
+            .{ .allocate = .alloc_always, .ignore_unknown_fields = true },
         )) |config| {
             return config.api_key;
         } else |err| {
@@ -195,7 +195,9 @@ fn getApiKey(ctx: Context) ![]const u8 {
     try std.posix.tcsetattr(handle, .NOW, hidden);
     errdefer std.posix.tcsetattr(handle, .NOW, original) catch {};
 
-    const password = if (ctx.env_map.get("NEOCITIES_PASSWORD")) |pw| pw else blk: {
+    const password = if (ctx.env_map.get("NEOCITIES_PASSWORD")) |pw|
+        ctx.allocator.dupe(u8, pw)
+    else blk: {
         var buf: [64]u8 = undefined;
         var size: usize = 0;
         while (true) {
@@ -237,8 +239,8 @@ fn getApiKey(ctx: Context) ![]const u8 {
     }
 
     const config: Config = .{
-        .api_key = api_key_request.value.api_key.?,
-        .username = username,
+        .API_KEY = api_key_request.value.api_key.?,
+        .SITENAME = username,
     };
 
     var ws = std.json.writeStream(config_file.writer(), .{});
