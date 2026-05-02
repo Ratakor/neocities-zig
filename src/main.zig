@@ -2,10 +2,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 const Neocities = @import("Neocities");
+const Context = @import("Context.zig");
 
 pub const std_options: std.Options = .{
     .log_level = if (builtin.mode == .Debug) .debug else .info,
-    .logFn = coloredLog,
+    // .logFn = coloredLog,
 };
 
 const usage =
@@ -98,93 +99,91 @@ const Color = enum(u8) {
     }
 };
 
-var progname: []const u8 = undefined;
+// TODO: use axe
+// fn coloredLog(
+//     comptime message_level: std.log.Level,
+//     comptime scope: @EnumLiteral(),
+//     comptime format: []const u8,
+//     args: anytype,
+// ) void {
+//     const level_txt = comptime switch (message_level) {
+//         .err => Color.bold ++ Color.red.toSeq() ++ "error" ++ Color.reset,
+//         .warn => Color.bold ++ Color.yellow.toSeq() ++ "warning" ++ Color.reset,
+//         .info => Color.bold ++ Color.blue.toSeq() ++ "info" ++ Color.reset,
+//         .debug => Color.bold ++ Color.cyan.toSeq() ++ "debug" ++ Color.reset,
+//     };
+//     const scope_prefix = (if (scope != .default) "@" ++ @tagName(scope) else "") ++ ": ";
+//     var stderr_buffer: [256]u8 = undefined;
+//     var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
+//     const stderr = &stderr_writer.interface;
 
-fn coloredLog(
-    comptime message_level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
-    comptime format: []const u8,
-    args: anytype,
-) void {
-    const level_txt = comptime switch (message_level) {
-        .err => Color.bold ++ Color.red.toSeq() ++ "error" ++ Color.reset,
-        .warn => Color.bold ++ Color.yellow.toSeq() ++ "warning" ++ Color.reset,
-        .info => Color.bold ++ Color.blue.toSeq() ++ "info" ++ Color.reset,
-        .debug => Color.bold ++ Color.cyan.toSeq() ++ "debug" ++ Color.reset,
-    };
-    const scope_prefix = (if (scope != .default) "@" ++ @tagName(scope) else "") ++ ": ";
-    var stderr_buffer: [256]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
-    const stderr = &stderr_writer.interface;
+//     std.debug.lockStdErr();
+//     defer std.debug.unlockStdErr();
+//     nosuspend {
+//         stderr.print(level_txt ++ scope_prefix ++ format ++ "\n", args) catch {};
+//         stderr.flush() catch {};
+//     }
+// }
 
-    std.debug.lockStdErr();
-    defer std.debug.unlockStdErr();
-    nosuspend {
-        stderr.print(level_txt ++ scope_prefix ++ format ++ "\n", args) catch {};
-        stderr.flush() catch {};
-    }
+// TODO: windows, use known-folders
+fn getConfigPath(allocator: std.mem.Allocator, env_map: *const std.process.Environ.Map) ![]const u8 {
+    return if (env_map.get("XDG_CONFIG_HOME")) |xdg_config|
+        std.fmt.allocPrint(allocator, "{s}/neocities/config.json", .{xdg_config})
+    else if (env_map.get("HOME")) |home|
+        std.fmt.allocPrint(allocator, "{s}/.config/neocities/config.json", .{home})
+    else
+        error.EnvironmentVariableMissing;
 }
 
-// TODO: windows
-fn getConfigPath(allocator: std.mem.Allocator) ![]const u8 {
-    if (std.process.getEnvVarOwned(allocator, "XDG_CONFIG_HOME")) |xdg_config| {
-        defer allocator.free(xdg_config);
-        return try std.fmt.allocPrint(allocator, "{s}/neocities/config.json", .{xdg_config});
-    } else |_| if (std.process.getEnvVarOwned(allocator, "HOME")) |home| {
-        defer allocator.free(home);
-        return try std.fmt.allocPrint(allocator, "{s}/.config/neocities/config.json", .{home});
-    } else |err| {
-        return err;
-    }
-}
-
-fn getApiKey(allocator: std.mem.Allocator) ![]const u8 {
-    if (std.process.getEnvVarOwned(allocator, "NEOCITIES_API_KEY")) |api_key| {
-        return api_key;
-    } else |err| {
-        if (err != error.EnvironmentVariableNotFound) {
-            return err;
-        }
+fn getApiKey(ctx: Context) ![]const u8 {
+    if (ctx.env_map.get("NEOCITIES_API_KEY")) |api_key| {
+        return ctx.allocator.dupe(u8, api_key);
     }
 
-    const config_path = try getConfigPath(allocator);
-    defer allocator.free(config_path);
-    const cwd = std.fs.cwd();
-    const config_file = if (cwd.openFile(config_path, .{})) |config_file| blk: {
-        const content = try config_file.readToEndAlloc(allocator, 4096);
-        defer allocator.free(content);
-        if (std.json.parseFromSlice(Config, allocator, content, .{})) |config| {
-            defer config.deinit();
-            return allocator.dupe(u8, config.value.api_key);
+    const config_path = try getConfigPath(ctx.allocator, ctx.env_map);
+    defer ctx.allocator.free(config_path);
+    const cwd = std.Io.Dir.cwd();
+    const config_file = if (cwd.openFile(ctx.io, config_path, .{})) |config_file| blk: {
+        var config_file_buffer: [1024]u8 = undefined;
+        var config_file_reader = config_file.reader(ctx.io, &config_file_buffer);
+        var json_reader = std.json.Reader.init(ctx.allocator, &config_file_reader.interface);
+        defer json_reader.deinit();
+        if (std.json.parseFromTokenSourceLeaky(
+            Config,
+            ctx.arena.allocator(),
+            &json_reader,
+            .{ .allocate = .alloc_always },
+        )) |config| {
+            return config.api_key;
         } else |err| {
             std.log.warn("Failed to parse the configuration file: {}", .{err});
-            break :blk try cwd.createFile(config_path, .{});
+            break :blk try cwd.createFile(ctx.io, config_path, .{});
         }
     } else |err| blk: {
         if (err != error.FileNotFound) {
             return err;
         }
-        try cwd.makePath(config_path[0 .. config_path.len - "config.json".len]);
-        break :blk try cwd.createFile(config_path, .{});
+        try cwd.createDirPath(ctx.io, std.fs.path.dirname(config_path).?);
+        break :blk try cwd.createFile(ctx.io, config_path, .{});
     };
 
-    var unbuffered_stdout = std.fs.File.stdout().writer(&.{});
+    var unbuffered_stdout = std.Io.File.stdout().writer(ctx.io, &.{});
     const stdout = &unbuffered_stdout.interface;
 
     var stdin_buffer: [64]u8 = undefined;
-    var stdin_reader = std.fs.File.stdin().reader(&stdin_buffer);
+    var stdin_reader = std.Io.File.stdin().reader(ctx.io, &stdin_buffer);
     const stdin = &stdin_reader.interface;
 
     try stdout.writeAll("Please login to get your API key.\n");
     try stdout.writeAll("Username: ");
-    const username = if (std.process.getEnvVarOwned(allocator, "NEOCITIES_USERNAME")) |name| blk: {
+    const username = if (ctx.env_map.get("NEOCITIES_USERNAME")) |name| blk: {
         try stdout.print("{s}\n", .{name});
-        break :blk name;
-    } else |_| blk: {
+        break :blk try ctx.allocator.dupe(u8, name);
+    } else blk: {
         const name = try stdin.takeDelimiterExclusive('\n'); // will crash if too long
-        break :blk try allocator.dupe(u8, name);
+        break :blk try ctx.allocator.dupe(u8, name);
     };
-    defer allocator.free(username);
+    defer ctx.allocator.free(username);
 
     try stdout.writeAll("Password: ");
 
@@ -196,9 +195,7 @@ fn getApiKey(allocator: std.mem.Allocator) ![]const u8 {
     try std.posix.tcsetattr(handle, .NOW, hidden);
     errdefer std.posix.tcsetattr(handle, .NOW, original) catch {};
 
-    const password = if (std.process.getEnvVarOwned(allocator, "NEOCITIES_PASSWORD")) |pass| blk: {
-        break :blk pass;
-    } else |_| blk: {
+    const password = if (ctx.env_map.get("NEOCITIES_PASSWORD")) |pw| pw else blk: {
         var buf: [64]u8 = undefined;
         var size: usize = 0;
         while (true) {
@@ -221,13 +218,13 @@ fn getApiKey(allocator: std.mem.Allocator) ![]const u8 {
             try stdout.writeAll("*");
         }
         try stdout.writeAll("\n");
-        break :blk try allocator.dupe(u8, buf[0..size]);
+        break :blk try ctx.allocator.dupe(u8, buf[0..size]);
     };
-    defer allocator.free(password);
+    defer ctx.allocator.free(password);
 
     try std.posix.tcsetattr(handle, .NOW, original);
 
-    const nc = Neocities.initPassword(allocator, username, password);
+    const nc = Neocities.initPassword(ctx.allocator, username, password);
     const api_key_request = try nc.key();
     defer api_key_request.deinit();
 
@@ -250,10 +247,10 @@ fn getApiKey(allocator: std.mem.Allocator) ![]const u8 {
 
     std.log.info("Your API key has been saved to '{s}'.", .{config_path});
 
-    return allocator.dupe(u8, api_key_request.value.api_key.?);
+    return ctx.allocator.dupe(u8, api_key_request.value.api_key.?);
 }
 
-fn upload(args: *std.process.ArgIterator, nc: Neocities) !void {
+fn upload(args: *std.process.Args.Iterator, nc: Neocities) !void {
     var filenames = std.ArrayList([]const u8).init(nc.allocator);
     defer filenames.deinit();
     while (args.next()) |arg| {
@@ -346,7 +343,7 @@ fn upload(args: *std.process.ArgIterator, nc: Neocities) !void {
     }
 }
 
-fn delete(args: *std.process.ArgIterator, nc: Neocities) !void {
+fn delete(args: *std.process.Args.Iterator, nc: Neocities) !void {
     while (args.next()) |arg| {
         std.log.info("Deleting {s} ...", .{arg});
         const delete_request = try nc.delete(&[_][]const u8{arg});
@@ -451,14 +448,14 @@ fn trimDate(date: []const u8) []const u8 {
     return date[5 .. date.len - 6];
 }
 
-fn list(args: *std.process.ArgIterator, nc: Neocities) !void {
+fn list(args: *std.process.Args.Iterator, nc: Neocities) !void {
     var is_raw = false;
     var only_dir = false;
     var path: ?[]const u8 = null;
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--raw")) {
             is_raw = true;
-        } else if (std.mem.eql(u8, arg, "--dir")){
+        } else if (std.mem.eql(u8, arg, "--dir")) {
             only_dir = true;
         } else {
             path = arg;
@@ -538,16 +535,16 @@ fn list(args: *std.process.ArgIterator, nc: Neocities) !void {
     try stdout.writeAll(Color.reset);
 }
 
-fn logout(args: *std.process.ArgIterator, allocator: std.mem.Allocator) !void {
-    if (args.next()) |arg| {
+fn logout(ctx: Context) !void {
+    if (ctx.args.next()) |arg| {
         std.log.warn("Unknown argument: '{s}'\n", .{arg});
         try help(null);
         return;
     }
 
-    const config_path = try getConfigPath(allocator);
-    defer allocator.free(config_path);
-    std.fs.deleteFileAbsolute(config_path) catch |err| {
+    const config_path = try getConfigPath(ctx.allocator, ctx.env_map);
+    defer ctx.allocator.free(config_path);
+    std.Io.Dir.deleteFileAbsolute(ctx.io, config_path) catch |err| {
         if (err != error.FileNotFound) {
             return err;
         }
@@ -555,56 +552,68 @@ fn logout(args: *std.process.ArgIterator, allocator: std.mem.Allocator) !void {
     std.log.info("Your API key has been removed from '{s}'.", .{config_path});
 }
 
-fn help(command: ?[]const u8) !void {
-    const stderr = std.io.getStdErr().writer();
+fn help(ctx: Context, command: ?[]const u8) !void {
+    var stderr_buffer: [1024]u8 = undefined;
+    var stderr_writer = std.Io.File.stderr().writer(ctx.io, &stderr_buffer);
+    const stderr = &stderr_writer.interface;
+    defer stderr.flush() catch {};
+
     if (command) |cmd| {
         if (std.mem.eql(u8, cmd, "upload")) {
-            try stderr.print(usage_upload, .{progname});
+            try stderr.print(usage_upload, .{build_options.program_name});
         } else if (std.mem.eql(u8, cmd, "delete")) {
-            try stderr.print(usage_delete, .{progname});
+            try stderr.print(usage_delete, .{build_options.program_name});
         } else if (std.mem.eql(u8, cmd, "info")) {
-            try stderr.print(usage_info, .{progname});
+            try stderr.print(usage_info, .{build_options.program_name});
         } else if (std.mem.eql(u8, cmd, "list")) {
-            try stderr.print(usage_list, .{progname});
+            try stderr.print(usage_list, .{build_options.program_name});
         } else {
-            try stderr.print(usage, .{progname});
+            try stderr.print(usage, .{build_options.program_name});
         }
     } else {
-        try stderr.print(usage, .{progname});
+        try stderr.print(usage, .{build_options.program_name});
     }
 }
 
-pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer std.debug.assert(gpa.deinit() == .ok);
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    var ctx: Context = .{
+        .io = init.io,
+        .allocator = init.gpa,
+        .arena = init.arena,
+        .env_map = init.environ_map,
+        .args = undefined,
+        .api = undefined,
+    };
 
-    var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
-    progname = args.next().?;
+    ctx.args = try init.minimal.args.iterateAllocator(ctx.allocator);
+    defer ctx.args.deinit();
+    _ = ctx.args.skip();
 
-    const api_key = try getApiKey(allocator);
-    defer allocator.free(api_key);
-    const nc = Neocities.initApiKey(allocator, api_key);
+    const api_key = try getApiKey(ctx);
+    defer ctx.allocator.free(api_key);
+    ctx.api = .initApiKey(ctx.allocator, api_key);
 
-    const command = args.next() orelse "help";
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(ctx.io, &stdout_buffer);
+    const stdout = &stdout_writer.interface;
+    defer stdout.flush() catch {};
+
+    const command = ctx.args.next() orelse "help";
     if (std.mem.eql(u8, command, "upload")) {
-        try upload(&args, nc);
+        try upload(ctx);
     } else if (std.mem.eql(u8, command, "delete")) {
-        try delete(&args, nc);
+        try delete(ctx);
     } else if (std.mem.eql(u8, command, "info")) {
-        try info(args.next(), nc);
+        // try info(args.next(), nc);
     } else if (std.mem.eql(u8, command, "list")) {
-        try list(&args, nc);
+        try list(ctx);
     } else if (std.mem.eql(u8, command, "key")) {
-        const stdout = std.fs.File.stdout().writer(&.{});
-        try stdout.interface.print("{s}\n", .{api_key});
+        try stdout.print("{s}\n", .{api_key});
     } else if (std.mem.eql(u8, command, "logout")) {
-        try logout(&args, allocator);
+        try logout(ctx);
     } else if (std.mem.eql(u8, command, "version")) {
-        const stdout = std.fs.File.stdout().writer(&.{});
-        try stdout.interface.print("{s} v" ++ build_options.version_string ++ "\n", .{progname});
+        try stdout.writeAll(build_options.program_name ++ " v" ++ build_options.version_string ++ "\n");
     } else {
-        try help(args.next());
+        try help(ctx, ctx.args.next());
     }
 }
