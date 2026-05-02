@@ -19,11 +19,11 @@ according to your system. Zsh completions are available [here](_neocities).
 
 ### Building
 
-Requires zig 0.15.1
+Requires zig 0.16.0
 ```
 git clone https://github.com/ratakor/neocities-zig.git
 cd neocities-zig
-zig build -Doptimize=ReleaseSafe
+zig build --release=safe
 ```
 
 ## Configuration

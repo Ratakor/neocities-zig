@@ -2,12 +2,12 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const zon = @import("build.zig.zon");
 
 const program_name = "neocities";
 
-/// Must match the `version` in `build.zig.zon`.
-/// Remove `.pre` when tagging a new release and add it back on the next development cycle.
-const version: std.SemanticVersion = .{ .major = 0, .minor = 1, .patch = 3, .pre = "dev" };
+const version = std.SemanticVersion.parse(zon.version) catch unreachable;
+const minimum_zig_version = std.SemanticVersion.parse(zon.minimum_zig_version) catch unreachable;
 
 const release_targets = [_]std.Target.Query{
     .{ .cpu_arch = .aarch64, .os_tag = .macos },
@@ -17,6 +17,18 @@ const release_targets = [_]std.Target.Query{
 };
 
 pub fn build(b: *std.Build) void {
+    comptime if (builtin.zig_version.order(minimum_zig_version) == .lt) {
+        @compileError(std.fmt.comptimePrint(
+            \\Your Zig version does not meet the minimum build requirement:
+            \\  required Zig version: {[minimum_zig_version]f}
+            \\  actual   Zig version: {[current_version]f}
+            \\
+        , .{
+            .current_version = builtin.zig_version,
+            .minimum_zig_version = minimum_zig_version,
+        }));
+    };
+
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -35,16 +47,16 @@ pub fn build(b: *std.Build) void {
         break :blk options.createModule();
     };
 
-    const neocities = b.addModule("neocities", .{
-        .root_source_file = b.path("lib/Neocities.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
     // zig build release
     var release_artifacts: [release_targets.len]*std.Build.Step.Compile = undefined;
     for (release_targets, &release_artifacts) |target_query, *artifact| {
         const release_target = b.resolveTargetQuery(target_query);
+
+        const lib_module = b.createModule(.{
+            .root_source_file = b.path("lib/Neocities.zig"),
+            .target = release_target,
+            .optimize = optimize,
+        });
 
         const exe_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
@@ -55,7 +67,7 @@ pub fn build(b: *std.Build) void {
             .strip = strip,
             .imports = &.{
                 .{ .name = "build_options", .module = build_options },
-                .{ .name = "Neocities", .module = neocities },
+                .{ .name = "Neocities", .module = lib_module },
             },
         });
 
@@ -68,6 +80,27 @@ pub fn build(b: *std.Build) void {
     }
     release(b, &release_artifacts, resolved_version);
 
+    const lib_module = b.addModule("neocities", .{
+        .root_source_file = b.path("lib/Neocities.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = single_threaded,
+        .pic = pie,
+        .strip = strip,
+        .omit_frame_pointer = strip,
+    });
+
+    // zig build lib
+    const lib = b.addLibrary(.{
+        .name = "neocities",
+        .linkage = .static,
+        .root_module = lib_module,
+        .use_llvm = use_llvm,
+        .use_lld = use_llvm,
+    });
+    const lib_step = b.step("lib", "Build the library");
+    lib_step.dependOn(&b.addInstallArtifact(lib, .{}).step);
+
     const exe_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -77,7 +110,7 @@ pub fn build(b: *std.Build) void {
         .strip = strip,
         .imports = &.{
             .{ .name = "build_options", .module = build_options },
-            .{ .name = "Neocities", .module = neocities },
+            .{ .name = "Neocities", .module = lib_module },
         },
     });
 
@@ -101,7 +134,7 @@ pub fn build(b: *std.Build) void {
 
     // zib build test
     const exe_tests = b.addTest(.{ .root_module = exe_module });
-    const lib_tests = b.addTest(.{ .root_module = neocities });
+    const lib_tests = b.addTest(.{ .root_module = lib_module });
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const run_lib_tests = b.addRunArtifact(lib_tests);
     const test_step = b.step("test", "Run tests");
@@ -128,7 +161,7 @@ fn getVersion(b: *std.Build) std.SemanticVersion {
         "git", "-C", b.pathFromRoot("."), "--git-dir", ".git", "describe", "--match", "*.*.*", "--tags",
     };
     var code: u8 = undefined;
-    const git_describe_untrimmed = b.runAllowFail(argv, &code, .Ignore) catch |err| {
+    const git_describe_untrimmed = b.runAllowFail(argv, &code, .ignore) catch |err| {
         const argv_joined = std.mem.join(b.allocator, " ", argv) catch @panic("OOM");
         std.log.warn(
             \\Failed to run git describe to resolve version: {}
@@ -217,7 +250,7 @@ fn release(b: *std.Build, release_artifacts: []const *std.Build.Step.Compile, re
                 compress_cmd.addFileArg(b.path("README.md"));
             },
             .@"tar.xz" => {
-                compress_cmd.setEnvironmentVariable("PATH", b.graph.env_map.get("PATH") orelse "");
+                compress_cmd.setEnvironmentVariable("PATH", b.graph.environ_map.get("PATH") orelse "");
                 compress_cmd.setEnvironmentVariable("XZ_OPT", "-9");
                 compress_cmd.addArgs(&.{ "tar", "caf" });
                 file_path = compress_cmd.addOutputFileArg(file_name);

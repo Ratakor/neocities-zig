@@ -2,7 +2,7 @@
     .name = .neocities,
     .version = "0.1.3-dev",
     .fingerprint = 0xffc2cc8366cec8d5,
-    .minimum_zig_version = "0.15.1",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{},
     .paths = .{
         "build.zig",
